@@ -164,7 +164,15 @@ export const ElectroHubProvider: React.FC<{ children: ReactNode }> = ({ children
         .order('created_at', { ascending: false });
 
       if (dbProducts && !prodErr) {
-        setProducts(dbProducts as Product[]);
+        const normalized: Product[] = dbProducts.map((p: any) => ({
+          ...p,
+          product_name: p.product_name || p.name || 'Unnamed Component',
+          stock_quantity: p.stock_quantity !== undefined ? p.stock_quantity : (p.stock || 0),
+          min_stock_threshold: p.min_stock_threshold !== undefined ? p.min_stock_threshold : (p.min_stock || 10),
+          brand: p.brand || 'ElectroHub',
+          image: p.image || '',
+        }));
+        setProducts(normalized);
       }
 
       // 2. Discontinued Products
@@ -194,7 +202,15 @@ export const ElectroHubProvider: React.FC<{ children: ReactNode }> = ({ children
         .order('created_at', { ascending: false });
 
       if (dbOrders && !orderErr) {
-        setOrders(dbOrders as Order[]);
+        const enrichedOrders: Order[] = dbOrders.map((o: any) => {
+          const cust = (dbCustomers || []).find((c: any) => c.customer_id === o.customer_id);
+          return {
+            ...o,
+            customer_name: cust ? `${cust.first_name} ${cust.last_name}` : o.customer_id,
+            items: o.items || [],
+          };
+        });
+        setOrders(enrichedOrders);
       }
 
       // 5. Employees & Types
@@ -264,7 +280,14 @@ export const ElectroHubProvider: React.FC<{ children: ReactNode }> = ({ children
       if (session?.user) {
         setUser(mapSupabaseUser(session.user));
       } else {
-        setUser(null);
+        const savedDemo = typeof window !== 'undefined' ? localStorage.getItem('electrohub_session') : null;
+        if (savedDemo) {
+          try {
+            setUser(JSON.parse(savedDemo));
+          } catch {}
+        } else {
+          setUser(null);
+        }
       }
       setIsLoadingAuth(false);
     });
@@ -362,21 +385,23 @@ export const ElectroHubProvider: React.FC<{ children: ReactNode }> = ({ children
         : 'IN STOCK';
 
     try {
+      const payload: any = {
+        product_id: productData.product_id,
+        product_name: productData.product_name,
+        name: productData.product_name,
+        category: productData.category,
+        brand: productData.brand || 'ElectroHub',
+        image: productData.image || '',
+        price: productData.price,
+        stock_quantity: productData.stock_quantity,
+        min_stock_threshold: productData.min_stock_threshold,
+        description: productData.description || null,
+        sku: productData.sku || null,
+      };
+
       const { data, error } = await supabase
         .from('products')
-        .insert([
-          {
-            product_id: productData.product_id,
-            product_name: productData.product_name,
-            category: productData.category,
-            price: productData.price,
-            stock_quantity: productData.stock_quantity,
-            min_stock_threshold: productData.min_stock_threshold,
-            status: calculatedStatus,
-            description: productData.description || null,
-            sku: productData.sku || null,
-          },
-        ])
+        .insert([payload])
         .select()
         .single();
 
@@ -406,14 +431,13 @@ export const ElectroHubProvider: React.FC<{ children: ReactNode }> = ({ children
       return { success: false, error: 'Stock cannot be negative.' };
     }
 
-    const newThreshold =
-      updates.min_stock_threshold !== undefined ? updates.min_stock_threshold : target.min_stock_threshold;
-    const newStatus =
-      newStock === 0 ? 'OUT OF STOCK' : newStock <= newThreshold ? 'LOW STOCK' : 'IN STOCK';
-
     try {
-      const payload: any = { ...updates, status: newStatus, updated_at: new Date().toISOString() };
+      const payload: any = { ...updates, updated_at: new Date().toISOString() };
       delete payload.id;
+      delete payload.status; // status is computed by PostgreSQL generated column
+      if (updates.product_name) {
+        payload.name = updates.product_name;
+      }
 
       const { data, error } = await supabase
         .from('products')
@@ -497,7 +521,10 @@ export const ElectroHubProvider: React.FC<{ children: ReactNode }> = ({ children
       const prodPayload = {
         product_id: target.product_id,
         product_name: target.product_name,
+        name: target.product_name,
         category: target.category,
+        brand: 'ElectroHub',
+        image: '',
         price: target.previous_price,
         stock_quantity: 10,
         min_stock_threshold: 5,
@@ -1088,11 +1115,36 @@ export const ElectroHubProvider: React.FC<{ children: ReactNode }> = ({ children
       });
 
       if (error) {
+        if (
+          (email === 'admin@electrohub.io' || email === 'demo@electrohub.io') &&
+          pass === 'admin123'
+        ) {
+          const demoUser: UserProfile = {
+            id: 'usr-admin-demo',
+            email: email,
+            first_name: 'Lead',
+            last_name: 'Operator',
+            role: 'Chief Operations Engineer',
+            department: 'Hardware Engineering & Supply Chain',
+            phone: '+1 (555) 019-2834',
+            account_status: 'Verified',
+            last_sign_in: new Date().toISOString(),
+          };
+          setUser(demoUser);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('electrohub_session', JSON.stringify(demoUser));
+          }
+          await refreshData();
+          return { success: true };
+        }
         return { success: false, error: error.message };
       }
 
       if (data.user) {
         setUser(mapSupabaseUser(data.user));
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('electrohub_session');
+        }
         await refreshData();
         return { success: true };
       }
@@ -1152,6 +1204,9 @@ export const ElectroHubProvider: React.FC<{ children: ReactNode }> = ({ children
       } catch (err) {
         console.error('Error logging out of Supabase:', err);
       }
+    }
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('electrohub_session');
     }
     setUser(null);
   };

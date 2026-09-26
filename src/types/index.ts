@@ -16,7 +16,10 @@ export interface Product {
   id: string; // Internal UUID
   product_id: string; // e.g. "PRD-1001"
   product_name: string;
+  name?: string;
   category: ProductCategory;
+  brand?: string;
+  image?: string;
   price: number;
   stock_quantity: number;
   min_stock_threshold: number;

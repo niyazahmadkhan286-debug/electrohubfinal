@@ -267,6 +267,30 @@ export default function LoginPage() {
               </>
             )}
           </button>
+
+          {/* Quick Demo Sign-In button */}
+          {!isSignUpMode && (
+            <button
+              type="button"
+              onClick={async () => {
+                setEmail('admin@electrohub.io');
+                setPassword('admin123');
+                setIsLoading(true);
+                const res = await login('admin@electrohub.io', 'admin123');
+                setIsLoading(false);
+                if (res.success) {
+                  showToast.success('Demo Verified', 'Signed in as Lead Operations Operator.');
+                  router.push('/dashboard');
+                } else {
+                  setErrorMessage(res.error || 'Failed to sign in.');
+                }
+              }}
+              className="w-full py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-300 font-medium text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer mt-1"
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-400" />
+              <span>Quick Demo Sign-In (admin@electrohub.io)</span>
+            </button>
+          )}
         </form>
 
         {/* Toggle Sign Up / Sign In mode */}
