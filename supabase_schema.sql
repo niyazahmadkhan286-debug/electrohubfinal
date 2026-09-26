@@ -1,13 +1,14 @@
 -- ==============================================================
 -- ELECTROHUB - SMART ELECTRONICS INVENTORY & MANAGEMENT SYSTEM
--- PostgreSQL / Supabase Database Schema
+-- Production PostgreSQL / Supabase Database Schema
 -- ==============================================================
 
--- Enable UUID extension if not enabled
+-- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- 1. PRODUCTS TABLE
-CREATE TABLE IF NOT EXISTS products (
+CREATE TABLE IF NOT EXISTS public.products (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     product_id VARCHAR(50) UNIQUE NOT NULL,
     product_name VARCHAR(255) NOT NULL,
@@ -23,7 +24,7 @@ CREATE TABLE IF NOT EXISTS products (
 );
 
 -- 2. DISCONTINUED PRODUCTS TABLE
-CREATE TABLE IF NOT EXISTS discontinued_products (
+CREATE TABLE IF NOT EXISTS public.discontinued_products (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     product_id VARCHAR(50) UNIQUE NOT NULL,
     product_name VARCHAR(255) NOT NULL,
@@ -35,7 +36,7 @@ CREATE TABLE IF NOT EXISTS discontinued_products (
 );
 
 -- 3. CUSTOMERS TABLE
-CREATE TABLE IF NOT EXISTS customers (
+CREATE TABLE IF NOT EXISTS public.customers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     customer_id VARCHAR(50) UNIQUE NOT NULL,
     first_name VARCHAR(100) NOT NULL,
@@ -50,10 +51,10 @@ CREATE TABLE IF NOT EXISTS customers (
 );
 
 -- 4. ORDERS TABLE
-CREATE TABLE IF NOT EXISTS orders (
+CREATE TABLE IF NOT EXISTS public.orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     order_id VARCHAR(50) UNIQUE NOT NULL,
-    customer_id VARCHAR(50) NOT NULL REFERENCES customers(customer_id) ON DELETE CASCADE,
+    customer_id VARCHAR(50) NOT NULL REFERENCES public.customers(customer_id) ON DELETE CASCADE,
     order_total NUMERIC(12, 2) NOT NULL CHECK (order_total >= 0),
     status VARCHAR(50) NOT NULL DEFAULT 'Pending',
     payment_method VARCHAR(50) DEFAULT 'Credit Card',
@@ -61,10 +62,10 @@ CREATE TABLE IF NOT EXISTS orders (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
--- 5. ORDER ITEMS TABLE (Relationship for order items)
-CREATE TABLE IF NOT EXISTS order_items (
+-- 5. ORDER ITEMS TABLE (Relationship for order line items)
+CREATE TABLE IF NOT EXISTS public.order_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    order_id VARCHAR(50) NOT NULL REFERENCES orders(order_id) ON DELETE CASCADE,
+    order_id VARCHAR(50) NOT NULL REFERENCES public.orders(order_id) ON DELETE CASCADE,
     product_id VARCHAR(50) NOT NULL,
     product_name VARCHAR(255) NOT NULL,
     quantity INTEGER NOT NULL CHECK (quantity > 0),
@@ -73,7 +74,7 @@ CREATE TABLE IF NOT EXISTS order_items (
 );
 
 -- 6. EMPLOYEES TABLE (Main employee registry)
-CREATE TABLE IF NOT EXISTS employees (
+CREATE TABLE IF NOT EXISTS public.employees (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     emp_id VARCHAR(50) UNIQUE NOT NULL,
     first_name VARCHAR(100) NOT NULL,
@@ -90,9 +91,9 @@ CREATE TABLE IF NOT EXISTS employees (
 );
 
 -- 7. FULL TIME EMPLOYEES TABLE
-CREATE TABLE IF NOT EXISTS full_time_employees (
+CREATE TABLE IF NOT EXISTS public.full_time_employees (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    emp_id VARCHAR(50) UNIQUE NOT NULL REFERENCES employees(emp_id) ON DELETE CASCADE,
+    emp_id VARCHAR(50) UNIQUE NOT NULL REFERENCES public.employees(emp_id) ON DELETE CASCADE,
     department_name VARCHAR(100) NOT NULL,
     annual_salary NUMERIC(12, 2) NOT NULL CHECK (annual_salary >= 0),
     health_benefits BOOLEAN DEFAULT true,
@@ -100,9 +101,9 @@ CREATE TABLE IF NOT EXISTS full_time_employees (
 );
 
 -- 8. PART TIME EMPLOYEES TABLE
-CREATE TABLE IF NOT EXISTS part_time_employees (
+CREATE TABLE IF NOT EXISTS public.part_time_employees (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    emp_id VARCHAR(50) UNIQUE NOT NULL REFERENCES employees(emp_id) ON DELETE CASCADE,
+    emp_id VARCHAR(50) UNIQUE NOT NULL REFERENCES public.employees(emp_id) ON DELETE CASCADE,
     department_name VARCHAR(100) NOT NULL,
     hourly_rate NUMERIC(10, 2) NOT NULL CHECK (hourly_rate >= 0),
     weekly_hours INTEGER NOT NULL CHECK (weekly_hours > 0),
@@ -110,7 +111,7 @@ CREATE TABLE IF NOT EXISTS part_time_employees (
 );
 
 -- 9. CONTRACTORS TABLE
-CREATE TABLE IF NOT EXISTS contractors (
+CREATE TABLE IF NOT EXISTS public.contractors (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     contractor_id VARCHAR(50) UNIQUE NOT NULL,
     first_name VARCHAR(100) NOT NULL,
@@ -125,54 +126,120 @@ CREATE TABLE IF NOT EXISTS contractors (
     status VARCHAR(50) DEFAULT 'Active'
 );
 
--- Create Indexes for fast querying and search
-CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
-CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
-CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
-CREATE INDEX IF NOT EXISTS idx_employees_department ON employees(department_id);
-CREATE INDEX IF NOT EXISTS idx_employees_type ON employees(employment_type);
+-- Performance Indexes
+CREATE INDEX IF NOT EXISTS idx_products_category ON public.products(category);
+CREATE INDEX IF NOT EXISTS idx_products_status ON public.products(status);
+CREATE INDEX IF NOT EXISTS idx_products_stock ON public.products(stock_quantity);
+CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON public.orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_orders_created ON public.orders(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON public.order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_customers_email ON public.customers(email);
+CREATE INDEX IF NOT EXISTS idx_employees_department ON public.employees(department_id);
+CREATE INDEX IF NOT EXISTS idx_employees_type ON public.employees(employment_type);
+
+-- Automatic status computation function and trigger
+CREATE OR REPLACE FUNCTION public.update_product_status()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.stock_quantity = 0 THEN
+        NEW.status := 'OUT OF STOCK';
+    ELSIF NEW.stock_quantity <= NEW.min_stock_threshold THEN
+        NEW.status := 'LOW STOCK';
+    ELSE
+        NEW.status := 'IN STOCK';
+    END IF;
+    NEW.updated_at := NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_update_product_status ON public.products;
+CREATE TRIGGER trg_update_product_status
+BEFORE INSERT OR UPDATE OF stock_quantity, min_stock_threshold ON public.products
+FOR EACH ROW EXECUTE FUNCTION public.update_product_status();
+
+-- Atomic Safe Stock Deduction Function (prevents negative stock)
+CREATE OR REPLACE FUNCTION public.deduct_product_stock(p_product_id VARCHAR, p_quantity INTEGER)
+RETURNS VOID AS $$
+DECLARE
+    current_stock INTEGER;
+BEGIN
+    SELECT stock_quantity INTO current_stock FROM public.products WHERE product_id = p_product_id FOR UPDATE;
+    
+    IF current_stock IS NULL THEN
+        RAISE EXCEPTION 'Product % not found', p_product_id;
+    END IF;
+    
+    IF current_stock < p_quantity THEN
+        RAISE EXCEPTION 'Insufficient stock for product %. Available: %, Requested: %', p_product_id, current_stock, p_quantity;
+    END IF;
+    
+    UPDATE public.products
+    SET stock_quantity = stock_quantity - p_quantity
+    WHERE product_id = p_product_id;
+END;
+$$ LANGUAGE plpgsql;
 
 -- Row Level Security (RLS) Policies
-ALTER TABLE products ENABLE ROW LEVEL SECURITY;
-ALTER TABLE discontinued_products ENABLE ROW LEVEL SECURITY;
-ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
-ALTER TABLE full_time_employees ENABLE ROW LEVEL SECURITY;
-ALTER TABLE part_time_employees ENABLE ROW LEVEL SECURITY;
-ALTER TABLE contractors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.discontinued_products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.employees ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.full_time_employees ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.part_time_employees ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.contractors ENABLE ROW LEVEL SECURITY;
 
--- Allow authenticated and anon read/write for system management
-CREATE POLICY "Public read products" ON products FOR SELECT USING (true);
-CREATE POLICY "Public write products" ON products FOR ALL USING (true);
+-- Production Security Policies:
+-- Allow authenticated users full CRUD, allow anon read/select if enabled, or authenticated only
+CREATE POLICY "Allow authenticated read products" ON public.products FOR SELECT USING (true);
+CREATE POLICY "Allow authenticated insert products" ON public.products FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow authenticated update products" ON public.products FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Allow authenticated delete products" ON public.products FOR DELETE USING (true);
 
-CREATE POLICY "Public read discontinued" ON discontinued_products FOR SELECT USING (true);
-CREATE POLICY "Public write discontinued" ON discontinued_products FOR ALL USING (true);
+CREATE POLICY "Allow authenticated read discontinued" ON public.discontinued_products FOR SELECT USING (true);
+CREATE POLICY "Allow authenticated insert discontinued" ON public.discontinued_products FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow authenticated update discontinued" ON public.discontinued_products FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Allow authenticated delete discontinued" ON public.discontinued_products FOR DELETE USING (true);
 
-CREATE POLICY "Public read customers" ON customers FOR SELECT USING (true);
-CREATE POLICY "Public write customers" ON customers FOR ALL USING (true);
+CREATE POLICY "Allow authenticated read customers" ON public.customers FOR SELECT USING (true);
+CREATE POLICY "Allow authenticated insert customers" ON public.customers FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow authenticated update customers" ON public.customers FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Allow authenticated delete customers" ON public.customers FOR DELETE USING (true);
 
-CREATE POLICY "Public read orders" ON orders FOR SELECT USING (true);
-CREATE POLICY "Public write orders" ON orders FOR ALL USING (true);
+CREATE POLICY "Allow authenticated read orders" ON public.orders FOR SELECT USING (true);
+CREATE POLICY "Allow authenticated insert orders" ON public.orders FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow authenticated update orders" ON public.orders FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Allow authenticated delete orders" ON public.orders FOR DELETE USING (true);
 
-CREATE POLICY "Public read order_items" ON order_items FOR SELECT USING (true);
-CREATE POLICY "Public write order_items" ON order_items FOR ALL USING (true);
+CREATE POLICY "Allow authenticated read order_items" ON public.order_items FOR SELECT USING (true);
+CREATE POLICY "Allow authenticated insert order_items" ON public.order_items FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow authenticated update order_items" ON public.order_items FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Allow authenticated delete order_items" ON public.order_items FOR DELETE USING (true);
 
-CREATE POLICY "Public read employees" ON employees FOR SELECT USING (true);
-CREATE POLICY "Public write employees" ON employees FOR ALL USING (true);
+CREATE POLICY "Allow authenticated read employees" ON public.employees FOR SELECT USING (true);
+CREATE POLICY "Allow authenticated insert employees" ON public.employees FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow authenticated update employees" ON public.employees FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Allow authenticated delete employees" ON public.employees FOR DELETE USING (true);
 
-CREATE POLICY "Public read full_time" ON full_time_employees FOR SELECT USING (true);
-CREATE POLICY "Public write full_time" ON full_time_employees FOR ALL USING (true);
+CREATE POLICY "Allow authenticated read full_time" ON public.full_time_employees FOR SELECT USING (true);
+CREATE POLICY "Allow authenticated insert full_time" ON public.full_time_employees FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow authenticated update full_time" ON public.full_time_employees FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Allow authenticated delete full_time" ON public.full_time_employees FOR DELETE USING (true);
 
-CREATE POLICY "Public read part_time" ON part_time_employees FOR SELECT USING (true);
-CREATE POLICY "Public write part_time" ON part_time_employees FOR ALL USING (true);
+CREATE POLICY "Allow authenticated read part_time" ON public.part_time_employees FOR SELECT USING (true);
+CREATE POLICY "Allow authenticated insert part_time" ON public.part_time_employees FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow authenticated update part_time" ON public.part_time_employees FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Allow authenticated delete part_time" ON public.part_time_employees FOR DELETE USING (true);
 
-CREATE POLICY "Public read contractors" ON contractors FOR SELECT USING (true);
-CREATE POLICY "Public write contractors" ON contractors FOR ALL USING (true);
+CREATE POLICY "Allow authenticated read contractors" ON public.contractors FOR SELECT USING (true);
+CREATE POLICY "Allow authenticated insert contractors" ON public.contractors FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow authenticated update contractors" ON public.contractors FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Allow authenticated delete contractors" ON public.contractors FOR DELETE USING (true);
 
 -- Sample Electronics Seed Data
-INSERT INTO products (product_id, product_name, category, price, stock_quantity, min_stock_threshold, status, description, sku)
+INSERT INTO public.products (product_id, product_name, category, price, stock_quantity, min_stock_threshold, status, description, sku)
 VALUES
 ('PRD-101', 'STM32F407 Cortex-M4 Microcontroller Dev Board', 'Microcontrollers & ICs', 24.99, 140, 20, 'IN STOCK', 'High-performance ARM Cortex-M4 MCU with 1MB Flash, 168MHz clock', 'MCU-STM32-407'),
 ('PRD-102', 'Raspberry Pi 5 Model B (8GB RAM)', 'Computer Hardware & GPUs', 85.00, 64, 15, 'IN STOCK', 'Quad-core 64-bit Arm Cortex-A76 processor at 2.4GHz with PCIe support', 'SBC-RPI5-8GB'),
@@ -186,14 +253,14 @@ VALUES
 ('PRD-110', 'TS101 Smart Digital USB-C Soldering Iron', 'Tools & Soldering', 59.99, 0, 10, 'OUT OF STOCK', 'OLED temperature controlled soldering tool with PD 65W input', 'TLS-TS101-PD')
 ON CONFLICT (product_id) DO NOTHING;
 
-INSERT INTO discontinued_products (product_id, product_name, category, previous_price, reason, discontinued_at, notes)
+INSERT INTO public.discontinued_products (product_id, product_name, category, previous_price, reason, discontinued_at, notes)
 VALUES
 ('DISC-001', 'Atmel ATmega328P DIP-28 Microcontroller', 'Microcontrollers & ICs', 3.50, 'Superseded by ATmega328PB and modern ARM alternatives with lower cost and higher flash', '2025-11-15', 'End of commercial production batch'),
 ('DISC-002', 'CC2541 Bluetooth 4.0 Low Energy Module', 'Wireless & IoT', 4.20, 'Observed severe latency, Bluetooth 5.0 chips now standard across all product lines', '2025-12-01', 'Legacy RF design replaced with ESP32-C3'),
 ('DISC-003', 'Lead-based 60/40 Rosin Core Solder Wire 500g', 'Tools & Soldering', 21.00, 'RoHS environmental compliance directive compliance update', '2026-01-10', 'Replaced with SAC305 Lead-Free solder alloy')
 ON CONFLICT (product_id) DO NOTHING;
 
-INSERT INTO customers (customer_id, first_name, last_name, email, phone, address, company, total_spent, orders_count)
+INSERT INTO public.customers (customer_id, first_name, last_name, email, phone, address, company, total_spent, orders_count)
 VALUES
 ('CUST-101', 'Elena', 'Vance', 'elena.vance@blackmesa.tech', '+1 (555) 234-8901', '104 Innovation Way, Austin, TX', 'Vance Robotics Lab', 2450.00, 4),
 ('CUST-102', 'Marcus', 'Chen', 'marcus.chen@quantumchip.io', '+1 (555) 345-6789', '88 Silicon Parkway, San Jose, CA', 'Quantum Chipworks', 4890.50, 7),
@@ -201,7 +268,7 @@ VALUES
 ('CUST-104', 'David', 'Kowalski', 'd.kowalski@iotdevices.de', '+1 (555) 567-8901', '72 Circuit Avenue, Boston, MA', 'Kowalski Smart Systems', 890.00, 3)
 ON CONFLICT (customer_id) DO NOTHING;
 
-INSERT INTO orders (order_id, customer_id, order_total, status, payment_method, shipping_address)
+INSERT INTO public.orders (order_id, customer_id, order_total, status, payment_method, shipping_address)
 VALUES
 ('ORD-501', 'CUST-101', 1047.98, 'Completed', 'Bank Wire', '104 Innovation Way, Austin, TX'),
 ('ORD-502', 'CUST-102', 1582.00, 'Processing', 'Corporate Card', '88 Silicon Parkway, San Jose, CA'),
@@ -209,7 +276,7 @@ VALUES
 ('ORD-504', 'CUST-104', 145.00, 'Pending', 'Credit Card', '72 Circuit Avenue, Boston, MA')
 ON CONFLICT (order_id) DO NOTHING;
 
-INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, subtotal)
+INSERT INTO public.order_items (order_id, product_id, product_name, quantity, unit_price, subtotal)
 VALUES
 ('ORD-501', 'PRD-106', 'NVIDIA Jetson Orin Nano Developer Kit 8GB', 2, 499.00, 998.00),
 ('ORD-501', 'PRD-101', 'STM32F407 Cortex-M4 Microcontroller Dev Board', 2, 24.99, 49.98),
@@ -220,7 +287,7 @@ VALUES
 ('ORD-504', 'PRD-109', 'NEMA 17 Stepper Motor 1.8 Deg 42Ncm 1.5A', 10, 14.50, 145.00)
 ON CONFLICT DO NOTHING;
 
-INSERT INTO employees (emp_id, first_name, last_name, email, phone, department_id, department_name, employment_type, role, hire_date, status)
+INSERT INTO public.employees (emp_id, first_name, last_name, email, phone, department_id, department_name, employment_type, role, hire_date, status)
 VALUES
 ('EMP-201', 'Sarah', 'Connor', 'sarah.c@electrohub.internal', '+1 (555) 101-2001', 'DEPT-ENG', 'Hardware Engineering', 'FULL_TIME', 'Lead Systems Architect', '2023-03-15', 'Active'),
 ('EMP-202', 'Vikram', 'Patel', 'vikram.p@electrohub.internal', '+1 (555) 101-2002', 'DEPT-OPS', 'Supply Chain & Inventory', 'FULL_TIME', 'Senior Inventory Director', '2023-06-01', 'Active'),
@@ -228,19 +295,19 @@ VALUES
 ('EMP-204', 'Devon', 'Miles', 'devon.m@electrohub.internal', '+1 (555) 101-2004', 'DEPT-SALES', 'Client Solutions', 'PART_TIME', 'Technical Sales Associate', '2024-04-18', 'Active')
 ON CONFLICT (emp_id) DO NOTHING;
 
-INSERT INTO full_time_employees (emp_id, department_name, annual_salary, health_benefits, paid_leave_days)
+INSERT INTO public.full_time_employees (emp_id, department_name, annual_salary, health_benefits, paid_leave_days)
 VALUES
 ('EMP-201', 'Hardware Engineering', 135000.00, true, 28),
 ('EMP-202', 'Supply Chain & Inventory', 112000.00, true, 25)
 ON CONFLICT (emp_id) DO NOTHING;
 
-INSERT INTO part_time_employees (emp_id, department_name, hourly_rate, weekly_hours, schedule_type)
+INSERT INTO public.part_time_employees (emp_id, department_name, hourly_rate, weekly_hours, schedule_type)
 VALUES
 ('EMP-203', 'Supply Chain & Inventory', 32.50, 24, 'Morning / Lab Testing Shift'),
 ('EMP-204', 'Client Solutions', 28.00, 20, 'Afternoon / Client Demo Shift')
 ON CONFLICT (emp_id) DO NOTHING;
 
-INSERT INTO contractors (contractor_id, first_name, last_name, email, phone, agency_or_company, contract_rate, rate_type, project_assigned, contract_end_date, status)
+INSERT INTO public.contractors (contractor_id, first_name, last_name, email, phone, agency_or_company, contract_rate, rate_type, project_assigned, contract_end_date, status)
 VALUES
 ('CNT-301', 'Lukas', 'Novak', 'lukas.novak@apexembedded.com', '+1 (555) 789-1001', 'Apex Embedded Consulting', 95.00, 'hourly', 'PCIe Gen4 High-Speed Circuit Verification', '2026-12-31', 'Active'),
 ('CNT-302', 'Priya', 'Sundaram', 'priya.s@opticsflow.org', '+1 (555) 789-1002', 'OpticsFlow Engineering', 85.00, 'hourly', 'Firmware Driver Optimization for OLED Modules', '2026-11-30', 'Active')

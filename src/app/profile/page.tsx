@@ -22,7 +22,7 @@ import { useElectroHub } from '@/lib/store';
 import { showToast } from '@/components/ui/Toast';
 
 export default function ProfilePage() {
-  const { user, updateProfile, logout } = useElectroHub();
+  const { user, updateProfile, updatePassword, logout } = useElectroHub();
   const router = useRouter();
 
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -51,20 +51,24 @@ export default function ProfilePage() {
     setIsEditOpen(true);
   };
 
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateProfile({
+    const success = await updateProfile({
       first_name: firstName,
       last_name: lastName,
       phone,
       department,
       role,
     });
-    showToast.success('Profile Saved', 'Personal information and credentials updated.');
-    setIsEditOpen(false);
+    if (success) {
+      showToast.success('Profile Saved', 'Personal information and credentials updated.');
+      setIsEditOpen(false);
+    } else {
+      showToast.error('Profile Error', 'Failed to update user profile in Supabase.');
+    }
   };
 
-  const handleSavePassword = (e: React.FormEvent) => {
+  const handleSavePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPass.length < 6) {
       showToast.error('Password Too Short', 'Password must be at least 6 characters.');
@@ -75,11 +79,16 @@ export default function ProfilePage() {
       return;
     }
 
-    showToast.success('Password Changed', 'Security credentials updated in Supabase auth.');
-    setIsPasswordOpen(false);
-    setCurrentPass('');
-    setNewPass('');
-    setConfirmPass('');
+    const res = await updatePassword(newPass);
+    if (res.success) {
+      showToast.success('Password Changed', 'Security credentials updated in Supabase auth.');
+      setIsPasswordOpen(false);
+      setCurrentPass('');
+      setNewPass('');
+      setConfirmPass('');
+    } else {
+      showToast.error('Password Error', res.error || 'Failed to update password.');
+    }
   };
 
   const handleLogout = async () => {

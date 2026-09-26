@@ -159,7 +159,7 @@ export default function ProductsPage() {
     const stock = parseInt(formStock, 10) || 0;
     const threshold = parseInt(formThreshold, 10) || 10;
 
-    await addProduct({
+    const res = await addProduct({
       product_id: formId.trim().toUpperCase(),
       product_name: formName.trim(),
       category: formCategory,
@@ -171,8 +171,12 @@ export default function ProductsPage() {
       status: stock === 0 ? 'OUT OF STOCK' : stock <= threshold ? 'LOW STOCK' : 'IN STOCK',
     });
 
-    showToast.success('Product Added', `${formName} added to catalog.`);
-    setIsAddOpen(false);
+    if (res.success) {
+      showToast.success('Product Added', `${formName} added to catalog.`);
+      setIsAddOpen(false);
+    } else {
+      showToast.error('Add Failed', res.error || 'Failed to add product.');
+    }
   };
 
   // Submit Edit
@@ -184,7 +188,7 @@ export default function ProductsPage() {
     const stock = parseInt(formStock, 10) || 0;
     const threshold = parseInt(formThreshold, 10) || 10;
 
-    await updateProduct(selectedProduct.id, {
+    const res = await updateProduct(selectedProduct.id, {
       product_id: formId.trim().toUpperCase(),
       product_name: formName.trim(),
       category: formCategory,
@@ -195,24 +199,36 @@ export default function ProductsPage() {
       sku: formSku,
     });
 
-    showToast.success('Product Updated', `${formName} catalog details revised.`);
-    setIsEditOpen(false);
+    if (res.success) {
+      showToast.success('Product Updated', `${formName} catalog details revised.`);
+      setIsEditOpen(false);
+    } else {
+      showToast.error('Update Failed', res.error || 'Failed to update product.');
+    }
   };
 
   // Confirm Delete
   const handleConfirmDelete = async () => {
     if (!selectedProduct) return;
-    await deleteProduct(selectedProduct.id);
-    showToast.success('Product Removed', `${selectedProduct.product_name} deleted from database.`);
-    setIsDeleteOpen(false);
+    const res = await deleteProduct(selectedProduct.id);
+    if (res.success) {
+      showToast.success('Product Removed', `${selectedProduct.product_name} deleted from database.`);
+      setIsDeleteOpen(false);
+    } else {
+      showToast.error('Delete Failed', res.error || 'Failed to delete product.');
+    }
   };
 
   // Confirm Discontinue
   const handleConfirmDiscontinue = async () => {
     if (!selectedProduct) return;
-    await discontinueProduct(selectedProduct.id, discontinueReason);
-    showToast.warning('Product Discontinued', `${selectedProduct.product_name} moved to Discontinued Registry.`);
-    setIsDiscontinueOpen(false);
+    const res = await discontinueProduct(selectedProduct.id, discontinueReason);
+    if (res.success) {
+      showToast.warning('Product Discontinued', `${selectedProduct.product_name} moved to Discontinued Registry.`);
+      setIsDiscontinueOpen(false);
+    } else {
+      showToast.error('Discontinue Failed', res.error || 'Failed to discontinue product.');
+    }
   };
 
   const exportCSV = () => {

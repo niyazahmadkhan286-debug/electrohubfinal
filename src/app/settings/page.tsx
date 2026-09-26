@@ -2,20 +2,16 @@
 
 import React, { useState } from 'react';
 import {
-  Settings,
   Sun,
   Moon,
   Database,
   Bell,
-  User,
-  Shield,
   RefreshCw,
-  Trash2,
   Download,
   CheckCircle2,
   AlertCircle,
-  ExternalLink,
-  Sparkles,
+  FileCode,
+  ShieldCheck,
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useElectroHub } from '@/lib/store';
@@ -25,12 +21,9 @@ export default function SettingsPage() {
   const {
     settings,
     updateSettings,
-    setSupabaseCredentials,
     isSupabaseActive,
-    isSyncing,
-    syncWithSupabase,
-    resetToDemoData,
-    clearDatabase,
+    isLoadingData,
+    refreshData,
     products,
     customers,
     orders,
@@ -40,9 +33,7 @@ export default function SettingsPage() {
     discontinuedProducts,
   } = useElectroHub();
 
-  const [supabaseUrl, setSupabaseUrl] = useState(settings.supabase?.url || '');
-  const [supabaseKey, setSupabaseKey] = useState(settings.supabase?.anonKey || '');
-  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
 
   // Appearance handlers
   const handleThemeChange = (theme: 'light' | 'dark' | 'system') => {
@@ -65,35 +56,34 @@ export default function SettingsPage() {
         [key]: next,
       },
     });
-    showToast.info('Notification Updated', `Preference saved.`);
+    showToast.info('Notification Updated', 'Preference saved.');
   };
 
-  // Supabase connection handler
-  const handleSaveSupabase = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsTestingConnection(true);
+  // Supabase test and sync
+  const handleTestAndSync = async () => {
+    if (!isSupabaseActive) {
+      showToast.error(
+        'Supabase Not Configured',
+        'Please define NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your .env.local file.'
+      );
+      return;
+    }
 
+    setIsTesting(true);
     try {
-      const isConfigured = await setSupabaseCredentials(supabaseUrl.trim(), supabaseKey.trim());
-      if (isConfigured) {
-        showToast.success('Supabase Connected', 'Successfully initialized Supabase PostgreSQL connection!');
-      } else {
-        showToast.warning(
-          'Saved Credentials',
-          'Credentials saved. Check your URL format (https://your-ref.supabase.co).'
-        );
-      }
+      await refreshData();
+      showToast.success('Connection Verified', 'Successfully queried Supabase PostgreSQL database.');
     } catch (err: any) {
-      showToast.error('Connection Error', err.message || 'Failed to connect to Supabase.');
+      showToast.error('Sync Error', err.message || 'Failed to query Supabase.');
     } finally {
-      setIsTestingConnection(false);
+      setIsTesting(false);
     }
   };
 
   // Backup Export
   const handleExportJSON = () => {
     const backup = {
-      version: '1.0',
+      version: '2.0',
       timestamp: new Date().toISOString(),
       products,
       customers,
@@ -108,10 +98,13 @@ export default function SettingsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `electrohub_database_backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `electrohub_database_export_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
-    showToast.success('Backup Generated', 'Full database snapshot exported as JSON.');
+    showToast.success('Backup Exported', 'Full database snapshot exported as JSON.');
   };
+
+  const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const envKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   return (
     <DashboardLayout>
@@ -120,7 +113,7 @@ export default function SettingsPage() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-white">System Settings & Database</h2>
           <p className="text-xs text-slate-400 mt-1">
-            Configure UI appearance, real-time alert thresholds, Supabase credentials, and data backups.
+            Configure UI appearance, notification alert policies, Supabase PostgreSQL sync, and database exports.
           </p>
         </div>
 
@@ -277,136 +270,111 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* 3. SUPABASE POSTGRESQL CONFIGURATION */}
+        {/* 3. SUPABASE POSTGRESQL ENVIRONMENT STATUS */}
         <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-5">
           <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <div className="flex items-center gap-2">
               <Database className="w-4 h-4 text-emerald-400" />
               <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                Supabase PostgreSQL Connection
+                Supabase PostgreSQL Environment
               </h3>
             </div>
-            <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold"
-              style={{
-                backgroundColor: isSupabaseActive ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.1)',
-                borderColor: isSupabaseActive ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)',
-                color: isSupabaseActive ? '#34d399' : '#60a5fa',
-              }}
+            <div
+              className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${
+                isSupabaseActive
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                  : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+              }`}
             >
               {isSupabaseActive ? (
                 <>
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Live Supabase Connected</span>
+                  <span>Connected via Environment</span>
                 </>
               ) : (
                 <>
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Ready for Supabase URL</span>
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Awaiting Environment Variables</span>
                 </>
               )}
             </div>
           </div>
 
-          <p className="text-xs text-slate-300 leading-relaxed">
-            ElectroHub communicates directly with Supabase via `@supabase/supabase-js`. You can enter your project URL and public Anon key below, or set them in `.env.local` as `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-          </p>
-
-          <form onSubmit={handleSaveSupabase} className="space-y-4">
-            <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">
-                Supabase Project URL
-              </label>
-              <input
-                type="url"
-                value={supabaseUrl}
-                onChange={(e) => setSupabaseUrl(e.target.value)}
-                placeholder="https://xyzcompany.supabase.co"
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">
-                Supabase Anon / Public API Key
-              </label>
-              <input
-                type="password"
-                value={supabaseKey}
-                onChange={(e) => setSupabaseKey(e.target.value)}
-                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs font-mono"
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-              <span className="text-[11px] text-slate-500">
-                SQL schema is available at root: <code className="text-blue-400 font-mono">supabase_schema.sql</code>
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={syncWithSupabase}
-                  disabled={!isSupabaseActive || isSyncing}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold disabled:opacity-40 flex items-center gap-1.5"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                  <span>Sync from Supabase</span>
-                </button>
-                <button
-                  type="submit"
-                  disabled={isTestingConnection}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5"
-                >
-                  <Database className="w-3.5 h-3.5" />
-                  <span>{isTestingConnection ? 'Verifying...' : 'Save & Connect Supabase'}</span>
-                </button>
+          <div className="space-y-3 text-xs">
+            <div className="p-3 rounded-xl bg-slate-950 border border-slate-850 flex items-center justify-between">
+              <div>
+                <span className="text-slate-500 block">NEXT_PUBLIC_SUPABASE_URL</span>
+                <span className="font-mono text-white">
+                  {envUrl ? envUrl : '(Not set in .env.local)'}
+                </span>
               </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${envUrl ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+                {envUrl ? 'Configured' : 'Missing'}
+              </span>
             </div>
-          </form>
+
+            <div className="p-3 rounded-xl bg-slate-950 border border-slate-850 flex items-center justify-between">
+              <div>
+                <span className="text-slate-500 block">NEXT_PUBLIC_SUPABASE_ANON_KEY</span>
+                <span className="font-mono text-white">
+                  {envKey ? `${envKey.substring(0, 16)}••••••••••••` : '(Not set in .env.local)'}
+                </span>
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${envKey ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+                {envKey ? 'Configured' : 'Missing'}
+              </span>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl bg-slate-950 border border-slate-850 text-xs text-slate-300 space-y-2">
+            <div className="flex items-center gap-1.5 text-blue-400 font-semibold">
+              <FileCode className="w-4 h-4" />
+              <span>Production Setup Instructions</span>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              1. Add your project URL and public Anon key to <code className="text-white font-mono">.env.local</code>:
+            </p>
+            <pre className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-mono text-slate-200 overflow-x-auto">
+              NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co{'\n'}
+              NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+            </pre>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              2. Apply <code className="text-white font-mono">supabase_schema.sql</code> in your Supabase SQL Editor.
+            </p>
+          </div>
+
+          <div className="pt-2 flex justify-end gap-2">
+            <button
+              onClick={handleTestAndSync}
+              disabled={isTesting || isLoadingData}
+              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isTesting || isLoadingData ? 'animate-spin' : ''}`} />
+              <span>{isTesting ? 'Verifying Supabase...' : 'Test Connection & Sync Tables'}</span>
+            </button>
+          </div>
         </div>
 
-        {/* 4. DATABASE RESET & EVALUATION TOOLS */}
+        {/* 4. DATA EXPORT */}
         <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-4">
           <div className="flex items-center gap-2 pb-3 border-b border-slate-800">
-            <Shield className="w-4 h-4 text-purple-400" />
+            <ShieldCheck className="w-4 h-4 text-purple-400" />
             <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-              Data Management & Viva Demonstration Tools
+              Data Backup & Export
             </h3>
           </div>
 
           <p className="text-xs text-slate-300">
-            Use these controls to test empty database states, reload the rich electronics demo dataset, or export full backups.
+            Export a full JSON snapshot of all active products, customers, purchase orders, and workforce records.
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-            <button
-              onClick={() => {
-                resetToDemoData();
-                showToast.success('Demo Data Restored', 'Full electronics catalog, orders, and workforce reloaded.');
-              }}
-              className="p-3 rounded-xl bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 text-blue-300 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4 text-blue-400" />
-              <span>Reload Demo Dataset</span>
-            </button>
-
+          <div className="pt-1">
             <button
               onClick={handleExportJSON}
-              className="p-3 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer"
             >
               <Download className="w-4 h-4 text-slate-400" />
-              <span>Export Full JSON Backup</span>
-            </button>
-
-            <button
-              onClick={() => {
-                clearDatabase();
-                showToast.warning('Database Emptied', 'All items cleared to verify zero-state handling.');
-              }}
-              className="p-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <Trash2 className="w-4 h-4 text-rose-400" />
-              <span>Clear Database (Empty Test)</span>
+              <span>Export Full Database JSON Backup</span>
             </button>
           </div>
         </div>

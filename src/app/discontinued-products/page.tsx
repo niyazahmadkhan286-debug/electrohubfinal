@@ -70,14 +70,22 @@ export default function DiscontinuedProductsPage() {
 
   const handleConfirmRestore = async () => {
     if (!selectedItem) return;
-    await reactivateDiscontinuedProduct(selectedItem.id);
+    const res = await reactivateDiscontinuedProduct(selectedItem.id);
+    if (!res.success) {
+      showToast.error('Reactivation Failed', res.error || 'Failed to reactivate product.');
+      return;
+    }
     showToast.success('Component Reactivated', `${selectedItem.product_name} restored to active inventory.`);
     setIsRestoreOpen(false);
   };
 
   const handleConfirmDelete = async () => {
     if (!selectedItem) return;
-    await deleteDiscontinuedProduct(selectedItem.id);
+    const res = await deleteDiscontinuedProduct(selectedItem.id);
+    if (!res.success) {
+      showToast.error('Delete Failed', res.error || 'Failed to delete record.');
+      return;
+    }
     showToast.success('Archive Record Purged', `${selectedItem.product_name} deleted.`);
     setIsDeleteOpen(false);
   };

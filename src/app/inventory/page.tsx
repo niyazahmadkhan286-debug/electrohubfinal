@@ -79,12 +79,16 @@ export default function InventoryPage() {
       return;
     }
 
-    await adjustProductStock(selectedProduct.id, delta);
-    showToast.success(
-      adjustmentType === 'RECEIVE' ? 'Inventory Received' : 'Inventory Dispatched',
-      `${selectedProduct.product_name} adjusted by ${delta > 0 ? `+${delta}` : delta} units.`
-    );
-    setIsAdjustOpen(false);
+    const res = await adjustProductStock(selectedProduct.id, delta);
+    if (res.success) {
+      showToast.success(
+        adjustmentType === 'RECEIVE' ? 'Inventory Received' : 'Inventory Dispatched',
+        `${selectedProduct.product_name} adjusted by ${delta > 0 ? `+${delta}` : delta} units.`
+      );
+      setIsAdjustOpen(false);
+    } else {
+      showToast.error('Inventory Error', res.error || 'Failed to adjust stock.');
+    }
   };
 
   return (
@@ -283,14 +287,22 @@ export default function InventoryPage() {
                         <td className="py-3.5 pr-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
-                              onClick={() => adjustProductStock(p.id, 5)}
+                              onClick={async () => {
+                                const res = await adjustProductStock(p.id, 5);
+                                if (res.success) showToast.success('Stock Adjusted', `Added +5 units to ${p.product_name}.`);
+                                else showToast.error('Stock Error', res.error || 'Failed to adjust stock.');
+                              }}
                               className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-medium transition-colors"
                               title="Quick +5 units"
                             >
                               +5
                             </button>
                             <button
-                              onClick={() => adjustProductStock(p.id, 25)}
+                              onClick={async () => {
+                                const res = await adjustProductStock(p.id, 25);
+                                if (res.success) showToast.success('Stock Adjusted', `Added +25 units to ${p.product_name}.`);
+                                else showToast.error('Stock Error', res.error || 'Failed to adjust stock.');
+                              }}
                               className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-medium transition-colors"
                               title="Quick +25 units"
                             >

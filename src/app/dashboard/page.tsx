@@ -19,6 +19,7 @@ import {
   Package,
   Layers,
   Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { StatCard } from '@/components/ui/StatCard';
@@ -53,7 +54,8 @@ export default function DashboardPage() {
     addProduct,
     addCustomer,
     createOrder,
-    resetToDemoData,
+    refreshData,
+    isSupabaseActive,
   } = useElectroHub();
 
   // Quick Action Modals state
@@ -127,7 +129,7 @@ export default function DashboardPage() {
     const stock = parseInt(newProdStock, 10) || 0;
     const threshold = parseInt(newProdThreshold, 10) || 10;
 
-    await addProduct({
+    const res = await addProduct({
       product_id: newProdId.trim().toUpperCase(),
       product_name: newProdName.trim(),
       category: newProdCategory,
@@ -136,6 +138,11 @@ export default function DashboardPage() {
       min_stock_threshold: threshold,
       status: stock === 0 ? 'OUT OF STOCK' : stock <= threshold ? 'LOW STOCK' : 'IN STOCK',
     });
+
+    if (!res.success) {
+      showToast.error('Product Creation Failed', res.error || 'Failed to add product.');
+      return;
+    }
 
     showToast.success('Product Added', `${newProdName} has been cataloged.`);
     setIsAddProductOpen(false);
@@ -152,7 +159,7 @@ export default function DashboardPage() {
       return;
     }
 
-    await addCustomer({
+    const res = await addCustomer({
       customer_id: newCustId.trim().toUpperCase(),
       first_name: newCustFirst.trim(),
       last_name: newCustLast.trim(),
@@ -160,6 +167,11 @@ export default function DashboardPage() {
       phone: newCustPhone.trim() || '+1 (555) 000-0000',
       company: newCustCompany.trim() || undefined,
     });
+
+    if (!res.success) {
+      showToast.error('Customer Registration Failed', res.error || 'Failed to register customer.');
+      return;
+    }
 
     showToast.success('Customer Registered', `${newCustFirst} ${newCustLast} has been added.`);
     setIsAddCustomerOpen(false);
@@ -188,14 +200,16 @@ export default function DashboardPage() {
       return;
     }
 
-    const success = await createOrder({
+    const res = await createOrder({
       customer_id: targetCust,
       items: [{ product_id: targetProd, quantity: qty }],
     });
 
-    if (success) {
+    if (res.success) {
       showToast.success('Order Generated', 'Inventory adjusted and purchase order created.');
       setIsCreateOrderOpen(false);
+    } else {
+      showToast.error('Order Creation Failed', res.error || 'Failed to create order.');
     }
   };
 
@@ -292,11 +306,14 @@ export default function DashboardPage() {
                 Add Your First Product
               </button>
               <button
-                onClick={resetToDemoData}
+                onClick={async () => {
+                  await refreshData();
+                  showToast.info('Telemetry Synchronized', 'Updated database status from live backend.');
+                }}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5"
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                Load Electronics Demo Dataset
+                <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
+                Sync Live Backend
               </button>
             </div>
           </div>

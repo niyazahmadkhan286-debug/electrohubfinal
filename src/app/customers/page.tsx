@@ -107,7 +107,7 @@ export default function CustomersPage() {
       return;
     }
 
-    await addCustomer({
+    const res = await addCustomer({
       customer_id: formId.trim().toUpperCase(),
       first_name: formFirst.trim(),
       last_name: formLast.trim(),
@@ -117,8 +117,12 @@ export default function CustomersPage() {
       address: formAddress.trim() || undefined,
     });
 
-    showToast.success('Customer Registered', `${formFirst} ${formLast} added to directory.`);
-    setIsAddOpen(false);
+    if (res.success) {
+      showToast.success('Customer Registered', `${formFirst} ${formLast} added to directory.`);
+      setIsAddOpen(false);
+    } else {
+      showToast.error('Registration Failed', res.error || 'Failed to add customer.');
+    }
   };
 
   // Submit Edit
@@ -126,7 +130,7 @@ export default function CustomersPage() {
     e.preventDefault();
     if (!selectedCustomer) return;
 
-    await updateCustomer(selectedCustomer.id, {
+    const res = await updateCustomer(selectedCustomer.id, {
       customer_id: formId.trim().toUpperCase(),
       first_name: formFirst.trim(),
       last_name: formLast.trim(),
@@ -136,16 +140,24 @@ export default function CustomersPage() {
       address: formAddress.trim() || undefined,
     });
 
-    showToast.success('Customer Profile Updated', `${formFirst} ${formLast} saved.`);
-    setIsEditOpen(false);
+    if (res.success) {
+      showToast.success('Customer Profile Updated', `${formFirst} ${formLast} saved.`);
+      setIsEditOpen(false);
+    } else {
+      showToast.error('Update Failed', res.error || 'Failed to update customer.');
+    }
   };
 
   // Confirm Delete
   const handleConfirmDelete = async () => {
     if (!selectedCustomer) return;
-    await deleteCustomer(selectedCustomer.id);
-    showToast.success('Customer Deleted', `${selectedCustomer.first_name} ${selectedCustomer.last_name} removed.`);
-    setIsDeleteOpen(false);
+    const res = await deleteCustomer(selectedCustomer.id);
+    if (res.success) {
+      showToast.success('Customer Deleted', `${selectedCustomer.first_name} ${selectedCustomer.last_name} removed.`);
+      setIsDeleteOpen(false);
+    } else {
+      showToast.error('Delete Failed', res.error || 'Failed to delete customer.');
+    }
   };
 
   return (

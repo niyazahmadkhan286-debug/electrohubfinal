@@ -117,33 +117,43 @@ export default function OrdersPage() {
       quantity: c.quantity,
     }));
 
-    const success = await createOrder({
+    const res = await createOrder({
       customer_id: selectedCustomerId,
       items: payloadItems,
       payment_method: paymentMethod,
       shipping_address: shippingAddress,
     });
 
-    if (success) {
+    if (res.success) {
       showToast.success('Purchase Order Generated', 'Inventory deducted and invoice recorded.');
       setIsCreateOpen(false);
+    } else {
+      showToast.error('Order Creation Failed', res.error || 'Failed to create purchase order.');
     }
   };
 
   // Status Change
   const handleStatusChange = async (newStatus: OrderStatus) => {
     if (!selectedOrder) return;
-    await updateOrderStatus(selectedOrder.id, newStatus);
-    setSelectedOrder({ ...selectedOrder, status: newStatus });
-    showToast.info('Status Updated', `Order ${selectedOrder.order_id} set to ${newStatus}.`);
+    const res = await updateOrderStatus(selectedOrder.id, newStatus);
+    if (res.success) {
+      setSelectedOrder({ ...selectedOrder, status: newStatus });
+      showToast.info('Status Updated', `Order ${selectedOrder.order_id} set to ${newStatus}.`);
+    } else {
+      showToast.error('Status Update Failed', res.error || 'Failed to update status.');
+    }
   };
 
   // Confirm Delete
   const handleConfirmDelete = async () => {
     if (!selectedOrder) return;
-    await deleteOrder(selectedOrder.id);
-    showToast.success('Order Deleted', `Order ${selectedOrder.order_id} removed.`);
-    setIsDeleteOpen(false);
+    const res = await deleteOrder(selectedOrder.id);
+    if (res.success) {
+      showToast.success('Order Deleted', `Order ${selectedOrder.order_id} removed.`);
+      setIsDeleteOpen(false);
+    } else {
+      showToast.error('Delete Failed', res.error || 'Failed to delete order.');
+    }
   };
 
   return (

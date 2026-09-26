@@ -170,7 +170,7 @@ export default function EmployeesPage() {
     }
 
     if (addType === 'FULL_TIME') {
-      await addFullTimeEmployee({
+      const res = await addFullTimeEmployee({
         emp_id: formId.trim().toUpperCase(),
         first_name: formFirst.trim(),
         last_name: formLast.trim(),
@@ -184,9 +184,13 @@ export default function EmployeesPage() {
         paid_leave_days: parseInt(formLeaveDays, 10) || 25,
         status: 'Active',
       });
+      if (!res.success) {
+        showToast.error('Creation Failed', res.error || 'Failed to add full-time staff.');
+        return;
+      }
       showToast.success('Full-Time Staff Added', `${formFirst} ${formLast} added.`);
     } else if (addType === 'PART_TIME') {
-      await addPartTimeEmployee({
+      const res = await addPartTimeEmployee({
         emp_id: formId.trim().toUpperCase(),
         first_name: formFirst.trim(),
         last_name: formLast.trim(),
@@ -200,9 +204,13 @@ export default function EmployeesPage() {
         schedule_type: formSchedule,
         status: 'Active',
       });
+      if (!res.success) {
+        showToast.error('Creation Failed', res.error || 'Failed to add part-time employee.');
+        return;
+      }
       showToast.success('Part-Time Employee Added', `${formFirst} ${formLast} added.`);
     } else {
-      await addContractor({
+      const res = await addContractor({
         contractor_id: formId.trim().toUpperCase(),
         first_name: formFirst.trim(),
         last_name: formLast.trim(),
@@ -214,6 +222,10 @@ export default function EmployeesPage() {
         project_assigned: formProject,
         contract_end_date: formEndDate,
       });
+      if (!res.success) {
+        showToast.error('Creation Failed', res.error || 'Failed to register contractor.');
+        return;
+      }
       showToast.success('Contractor Registered', `${formFirst} ${formLast} added.`);
     }
 
@@ -225,8 +237,9 @@ export default function EmployeesPage() {
     e.preventDefault();
     if (!selectedRecord) return;
 
+    let res: { success: boolean; error?: string };
     if (selectedType === 'FULL_TIME') {
-      await updateFullTimeEmployee(selectedRecord.id, {
+      res = await updateFullTimeEmployee(selectedRecord.id, {
         first_name: formFirst,
         last_name: formLast,
         email: formEmail,
@@ -238,7 +251,7 @@ export default function EmployeesPage() {
         paid_leave_days: parseInt(formLeaveDays, 10),
       });
     } else if (selectedType === 'PART_TIME') {
-      await updatePartTimeEmployee(selectedRecord.id, {
+      res = await updatePartTimeEmployee(selectedRecord.id, {
         first_name: formFirst,
         last_name: formLast,
         email: formEmail,
@@ -250,7 +263,7 @@ export default function EmployeesPage() {
         schedule_type: formSchedule,
       });
     } else {
-      await updateContractor(selectedRecord.id, {
+      res = await updateContractor(selectedRecord.id, {
         first_name: formFirst,
         last_name: formLast,
         email: formEmail,
@@ -261,6 +274,11 @@ export default function EmployeesPage() {
       });
     }
 
+    if (!res.success) {
+      showToast.error('Update Failed', res.error || 'Could not update personnel record.');
+      return;
+    }
+
     showToast.success('Personnel Record Updated', `${formFirst} ${formLast} updated.`);
     setIsEditOpen(false);
   };
@@ -269,12 +287,18 @@ export default function EmployeesPage() {
   const handleConfirmDelete = async () => {
     if (!selectedRecord) return;
 
+    let res: { success: boolean; error?: string };
     if (selectedType === 'FULL_TIME') {
-      await deleteFullTimeEmployee(selectedRecord.id);
+      res = await deleteFullTimeEmployee(selectedRecord.id);
     } else if (selectedType === 'PART_TIME') {
-      await deletePartTimeEmployee(selectedRecord.id);
+      res = await deletePartTimeEmployee(selectedRecord.id);
     } else {
-      await deleteContractor(selectedRecord.id);
+      res = await deleteContractor(selectedRecord.id);
+    }
+
+    if (!res.success) {
+      showToast.error('Delete Failed', res.error || 'Could not remove record.');
+      return;
     }
 
     showToast.success('Record Deleted', `${selectedRecord.first_name} ${selectedRecord.last_name} removed.`);

@@ -12,19 +12,14 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const { user, isAuthenticated } = useElectroHub();
+  const { user, isLoadingAuth } = useElectroHub();
   const router = useRouter();
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   useEffect(() => {
-    // Quick auth check
-    const storedUser = localStorage.getItem('electrohub_user');
-    if (!storedUser && !user) {
+    if (!isLoadingAuth && !user) {
       router.push('/login');
-    } else {
-      setIsCheckingAuth(false);
     }
-  }, [user, router]);
+  }, [user, isLoadingAuth, router]);
 
   // Global Ctrl+K / Cmd+K listener
   useEffect(() => {
@@ -38,13 +33,17 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  if (isCheckingAuth) {
+  if (isLoadingAuth) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-3">
         <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm font-medium">Verifying ElectroHub Security Credentials...</p>
+        <p className="text-sm font-medium">Verifying ElectroHub Security Session...</p>
       </div>
     );
+  }
+
+  if (!user) {
+    return null;
   }
 
   return (
